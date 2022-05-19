@@ -2,8 +2,6 @@ module Utils where
 
 -- 🙈
 import Control.Monad.IO.Class
-fromJust :: Maybe a -> a
-fromJust (Just a) = a
 
 -- Either
 etpure :: Applicative m => a -> m (Either e a)
@@ -44,12 +42,12 @@ ekbind k f cb = k $ either (cb . Left) (($ cb) . f)
 eklift :: K i o a -> EK i o e a
 eklift = kmap Right
 
-kcodensity :: Monad m => m a -> (forall r. K (m r) (m r) a)
+kcodensity :: forall r m a. Monad m => m a -> (a -> m r) -> m r
 kcodensity = (>>=)
 
-kuncodensity :: Monad m => (forall r. K (m r) (m r) a) -> m a
+kuncodensity :: forall r m a. Monad m => ((r -> m r) -> m a) -> m a
 kuncodensity = ($ pure)
 
-kliftIO :: MonadIO m => (forall r. K (IO r) (IO r) a) -> K (m r) (m r) a
+kliftIO :: forall r s m a. MonadIO m => ((r -> IO r) -> IO a) -> (a -> m s) -> m s
 kliftIO k = kcodensity $ liftIO $ kuncodensity k
 

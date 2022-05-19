@@ -4,4 +4,7 @@ build: hpack
 hpack:
 	hpack .
 
-.PHONY: build hpack
+ghcid:
+	ghcid -c "cabal repl"
+
+.PHONY: build hpack ghcid

@@ -9,15 +9,16 @@
 
 module Lib (serverMain) where
 
+import Data.Maybe (fromJust)
+import Language.LSP.Types
 import Control.Applicative
 import Control.Arrow ((&&&))
-import Control.Monad.IO.Class (MonadIO (liftIO))
+import Control.Monad.IO.Class (MonadIO)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Maybe (runMaybeT)
 import Control.Monad.Trans.Except (runExceptT, throwE)
 import Data.Bifunctor (Bifunctor (first, second))
 import Data.Coerce
-import Data.Foldable (asum)
 import Data.Functor ((<&>))
 import Data.Functor.Compose
 import Data.Kind
@@ -27,8 +28,9 @@ import Data.Maybe (listToMaybe)
 import Data.Monoid (Endo (..))
 import Data.String.Conversions
 import Data.Text (Text, intercalate, pack, replace, unpack)
-import DynFlags (DynFlags)
 import GhcideSteal (gotoDefinition, hoverInfo, symbolKindOfOccName)
+import GHC.Iface.Ext.Types
+import GHC.Plugins hiding ((<>), Type, empty, getDynFlags)
 import HIE.Bios
   ( CradleLoadResult (CradleFail, CradleNone, CradleSuccess),
     loadCradle,
@@ -59,7 +61,6 @@ import HieDb.Types
     LibDir (LibDir),
     Res,
   )
-import HieTypes (HieAST, HieFile (hie_asts, hie_types), TypeIndex)
 import Language.LSP.Server
   ( Handlers,
     LanguageContextEnv (..),
@@ -73,42 +74,12 @@ import Language.LSP.Server
     runServer,
     type (<~>) (Iso),
   )
-import Language.LSP.Types
-  ( DefinitionParams (..),
-    ErrorCode (InternalError, InvalidRequest),
-    Hover (..),
-    HoverContents (..),
-    HoverParams (..),
-    List (List),
-    Location (Location, _range, _uri),
-    MarkupContent (..),
-    MarkupKind (MkMarkdown),
-    Message,
-    Method (Initialize, TextDocumentHover, WorkspaceSymbol),
-    Position (Position, _character, _line),
-    Range (Range, _end, _start),
-    RequestMessage (RequestMessage, _params),
-    ResponseError (ResponseError),
-    SMethod (STextDocumentDefinition, STextDocumentHover, SWorkspaceSymbol),
-    SymbolInformation (..),
-    TextDocumentIdentifier (..),
-    Uri,
-    WorkspaceSymbolParams (WorkspaceSymbolParams, _query),
-    filePathToUri,
-    sectionSeparator,
-    uriToFilePath,
-    type (|?) (InL, InR),
-  )
 import Language.LSP.Types.Lens (uri)
 import Lens.Micro ((^.))
-import Module (ModuleName, moduleNameSlashes, moduleNameString)
-import OccName
-  ( occNameString,
-  )
 import System.Directory (doesFileExist)
 import System.FilePath ((<.>), (</>))
 import System.IO (stderr)
-import Utils (EK, ekbind, eklift, etbind, etpure, fromJust, kbind, kcodensity, kliftIO)
+import Utils (EK, ekbind, eklift, etbind, etpure, kbind, kcodensity, kliftIO)
 
 -- LSP utils
 getWsRoot :: MonadLsp cfg m => EK (m r) (m r) ResponseError FilePath
@@ -134,10 +105,10 @@ getDynFlags wsroot = liftIO $ do
 
 -- HieDb utils
 coordsHieDbToLSP :: (Int, Int) -> Position
-coordsHieDbToLSP (l, c) = Position {_line = l - 1, _character = c - 1}
+coordsHieDbToLSP (l, c) = Position {_line = fromIntegral $ l - 1, _character = fromIntegral $ c - 1}
 
 coordsLSPToHieDb :: Position -> (Int, Int)
-coordsLSPToHieDb Position {..} = (_line + 1, _character + 1)
+coordsLSPToHieDb Position {..} = (fromIntegral _line + 1, fromIntegral _character + 1)
 
 -- {{{ hacky garbage that needs to be replaced
 
@@ -209,11 +180,32 @@ hieFileAndAstFromPointRequest hiedb tdocId position =
 renderHieDbError :: HieDbErr -> Text
 renderHieDbError =
   pack . \case
-    NotIndexed modname munitid -> "not indexed"
-    AmbiguousUnitId modinfo -> "ambiguous unit id"
-    NameNotFound occname mmodname munitid -> "name not found"
-    NoNameAtPoint tgt hiepos -> "no name at point"
-    NameUnhelpfulSpan name str -> "name unhelpful span"
+    NotIndexed modname munitid ->
+          "NotIndexed ModuleName: "
+      <> show modname
+      <> ", "
+      <> "(Maybe Unit): "
+      <> show (unitString <$> munitid)
+    AmbiguousUnitId modinfo ->
+      "AmbiguousUnitId (NonEmpty ModuleInfo): "
+      <> show modinfo
+    NameNotFound occname mmodname munitid ->
+      "NameNotFound OccName: "
+      <> occNameString occname
+      <> ", (Maybe ModuleName):"
+      <> show mmodname
+      <> ", (Maybe Unit): "
+      <> show (unitString <$> munitid)
+    NoNameAtPoint tgt hiepos ->
+      "NoNameAtPoint HieTarget: "
+      <> show tgt
+      <> ", (Int, Int): "
+      <> show hiepos
+    NameUnhelpfulSpan name str ->
+      "NameUnhelpfulSpan Name: "
+        <> nameStableString name
+        <> ", String: "
+        <> str
 
 hiedbErrorToResponseError :: HieDbErr -> ResponseError
 hiedbErrorToResponseError = flip (ResponseError InternalError) Nothing . renderHieDbError
@@ -236,7 +228,6 @@ symbolInfo wsroot (DefRow {..} :. m) = do
         SymbolInformation
           { _name = pack $ occNameString defNameOcc,
             _kind = symbolKindOfOccName defNameOcc,
-            _deprecated = Nothing,
             _location =
               Location
                 { _uri = tdi ^. uri,
@@ -246,7 +237,9 @@ symbolInfo wsroot (DefRow {..} :. m) = do
                         _end = coordsHieDbToLSP (defELine, defECol)
                       }
                 },
-            _containerName = Just $ pack $ moduleNameString $ modInfoName m
+            _containerName = Just $ pack $ moduleNameString $ modInfoName m,
+            _tags = Nothing,
+            _deprecated = Nothing
           }
 
 handleWorkspaceSymbolRequest :: Handlers (LspT c IO)
@@ -261,12 +254,12 @@ handleWorkspaceSymbolRequest = requestHandler SWorkspaceSymbol $ \req ->
     requestQuery :: Message 'WorkspaceSymbol -> Text
     requestQuery RequestMessage {_params = WorkspaceSymbolParams {_query = q}} = q
 
-retrieveHoverData :: HieDb -> DynFlags -> Message 'TextDocumentHover -> IO (Either ResponseError (Maybe Hover))
-retrieveHoverData hiedb dflags RequestMessage {_params = HoverParams {..}} =
+retrieveHoverData :: HieDb -> Message 'TextDocumentHover -> IO (Either ResponseError (Maybe Hover))
+retrieveHoverData hiedb RequestMessage {_params = HoverParams {..}} =
   hieFileAndAstFromPointRequest hiedb _textDocument _position `etbind` \(hiefile, mast) -> case mast of
     Nothing -> etpure Nothing
     Just ast -> etpure $
-      Just $ case hoverInfo dflags (hie_types hiefile) ast of
+      Just $ case hoverInfo (hie_types hiefile) ast of
         (mbrange, contents) ->
           Hover
             { _range = mbrange,
@@ -278,8 +271,9 @@ handleTextDocumentHoverRequest = requestHandler STextDocumentHover $ \req ->
   getWsRoot `ekbind` \wsroot ->
     kliftIO $
       withHieDb (wsroot </> ".hiedb") `kbind` \hiedb ->
+        -- TODO: can probably remove this `getDynFlags` call somehow
         kcodensity $
-          getDynFlags wsroot `etbind` \dflags -> retrieveHoverData hiedb dflags req
+          getDynFlags wsroot `etbind` \_ -> retrieveHoverData hiedb req
 
 handleDefinitionRequest :: Handlers (LspT c IO)
 handleDefinitionRequest = requestHandler STextDocumentDefinition $ \RequestMessage {_params = DefinitionParams {..}} ->
@@ -331,7 +325,8 @@ serverDef =
             handleDefinitionRequest
           ],
       interpretHandler = \env -> Iso (runLspT env) liftIO,
-      options = defaultOptions
+      options = defaultOptions,
+      defaultConfig = ()
     }
 
 serverMain :: IO Int
