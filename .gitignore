@@ -23,5 +23,10 @@ cabal.project.local~
 
 *.cabal
 
+# direnv related stuff
 .envrc
 .direnv/
+
+# nix related stuff
+result
+result-2
