@@ -1,10 +1,38 @@
+{ compiler ? "ghc921" }:
 let
   sources = import ./nix/sources.nix;
-  compilerVersion = import ./compiler.nix;
-  hnix = import sources.iohk-hnix {};
-  pkgs = (import hnix.sources.nixpkgs) hnix.nixpkgsArgs;
+  pkgs = import sources.nixpkgs {};
+
+  gitignore = pkgs.nix-gitignore.gitignoreSourcePure [ ./.gitignore ];
+
+  myHaskellPackages = pkgs.haskell.packages.${compiler}.override {
+    overrides = hself: hsuper: {
+      "halfsp" =
+        hself.callCabal2nix
+          "halfsp"
+          (gitignore ./.)
+          {};
+    };
+  };
+
+  shell = myHaskellPackages.shellFor {
+    packages = p: [
+      p."halfsp"
+    ];
+    buildInputs = [
+      myHaskellPackages.haskell-language-server
+      pkgs.haskellPackages.cabal-install
+      pkgs.haskellPackages.ghcid
+      pkgs.haskellPackages.hlint
+      pkgs.haskellPackages.hpack
+      pkgs.niv
+      pkgs.alejandra
+    ];
+    withHoogle = true;
+  };
 in
-pkgs.haskell-nix.cabalProject {
-  src = pkgs.haskell-nix.haskellLib.cleanGit { src = ./.; };
-  compiler-nix-name = compilerVersion;
+{
+  inherit shell;
+  inherit myHaskellPackages;
+  "halfsp" = myHaskellPackages."halfsp";
 }
