@@ -23,10 +23,14 @@ cabal.project.local~
 
 *.cabal
 
-# direnv related stuff
+# direnv
 .envrc
 .direnv/
 
-# nix related stuff
+# nix build
 result
 result-2
+
+# hiedb
+.hiedb
+.hiefiles/
