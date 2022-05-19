@@ -7,7 +7,7 @@
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE ViewPatterns #-}
 
-module Lib (serverMain) where
+module Lib (serverMain, indexInGhcid) where
 
 import Data.Maybe (fromJust)
 import Language.LSP.Types
@@ -76,7 +76,7 @@ import Language.LSP.Server
   )
 import Language.LSP.Types.Lens (uri)
 import Lens.Micro ((^.))
-import System.Directory (doesFileExist)
+import System.Directory (doesFileExist, getCurrentDirectory)
 import System.FilePath ((<.>), (</>))
 import System.IO (stderr)
 import Utils (EK, ekbind, eklift, etbind, etpure, kbind, kcodensity, kliftIO)
@@ -312,6 +312,25 @@ doInitialize env _ = runExceptT $ do
       case resRootPath env of
         Nothing -> throwE $ ResponseError InvalidRequest "No root workspace was found" Nothing
         Just wsroot -> pure wsroot
+
+indexInGhcid :: IO ()
+indexInGhcid = do
+  currentDir <- getCurrentDirectory
+  let database = currentDir </> ".hiedb"
+  withHieDb database $ \hiedb -> do
+    initConn hiedb
+    hieFiles <- getHieFilesIn (currentDir </> ".hiefiles")
+    let options =
+          Options
+            { trace = False
+            , quiet = True
+            , colour = True
+            , context = Nothing
+            , reindex = False
+            , keepMissing = False
+            , database
+            }
+    doIndex hiedb options stderr hieFiles
 
 serverDef :: ServerDefinition ()
 serverDef =
