@@ -113,7 +113,7 @@ coordsLSPToHieDb Position {..} = (fromIntegral _line + 1, fromIntegral _characte
 -- {{{ hacky garbage that needs to be replaced
 
 hardcodedSourceDirs :: [Text]
-hardcodedSourceDirs = ["src", "test"]
+hardcodedSourceDirs = ["src", "lib", "test"]
 
 replaceMany :: [Text] -> Text -> Text -> Text
 replaceMany patterns substitution = appEndo . foldMap (Endo . flip replace substitution) $ patterns
