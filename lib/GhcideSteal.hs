@@ -31,15 +31,17 @@ import GHC.Plugins hiding ((<>))
 
 -- {{{ Development.IDE.GHC.Error
 
-realSrcSpanToRange :: RealSrcSpan -> Range
+realSrcSpanToRange :: RealSrcSpan -> Maybe Range
 realSrcSpanToRange real =
   Range
-    (realSrcLocToPosition $ realSrcSpanStart real)
-    (realSrcLocToPosition $ realSrcSpanEnd real)
+    <$> (realSrcLocToPosition $ realSrcSpanStart real)
+    <*> (realSrcLocToPosition $ realSrcSpanEnd real)
 
-realSrcLocToPosition :: RealSrcLoc -> Position
+realSrcLocToPosition :: RealSrcLoc -> Maybe Position
 realSrcLocToPosition real =
-  Position (fromIntegral $ srcLocLine real - 1) (fromIntegral $ srcLocCol real - 1)
+  Position
+    <$> intToUInt (srcLocLine real - 1)
+    <*> intToUInt (srcLocCol real - 1)
 
 -- | Extract a file name from a GHC SrcSpan (use message for unhelpful ones)
 -- FIXME This may not be an _absolute_ file name, needs fixing.
@@ -56,7 +58,7 @@ srcSpanToLocation wsroot src = do
 -- | Convert a GHC SrcSpan to a DAML compiler Range
 srcSpanToRange :: SrcSpan -> Maybe Range
 srcSpanToRange (UnhelpfulSpan _) = Nothing
-srcSpanToRange (RealSrcSpan real _) = Just $ realSrcSpanToRange real
+srcSpanToRange (RealSrcSpan real _) = realSrcSpanToRange real
 
 -- }}}
 
@@ -79,7 +81,7 @@ showNameWithoutUniques outputable = T.pack $ renderWithContext sdocContext (ppr 
     sdocContext = pprStyleToSDocContext $ mkUserStyle neverQualify AllTheWay
 
 hoverInfo :: Array TypeIndex HieTypeFlat -> HieAST TypeIndex -> (Maybe Range, [T.Text])
-hoverInfo typeLookup ast = (Just range, prettyNames ++ pTypes)
+hoverInfo typeLookup ast = (range, prettyNames ++ pTypes)
   where
     pTypes
       | Prelude.length names == 1 = dropEnd1 $ map wrapHaskell prettyTypes
@@ -200,3 +202,13 @@ defRowToLocation wsroot (row :. info) = do
 dropEnd1 :: [a] -> [a]
 dropEnd1 [] = []
 dropEnd1 (x : xs) = foldr (\z f y -> y : f z) (const []) xs x
+
+-- | Use 'fromIntegral' when it is safe to do so
+intToUInt :: Int -> Maybe UInt
+intToUInt x =
+  if minBoundAsInt >= x && x <= maxBoundAsInt
+    then Just $ fromIntegral x
+    else Nothing
+  where
+    minBoundAsInt = fromIntegral $ minBound @UInt
+    maxBoundAsInt = fromIntegral $ maxBound @UInt

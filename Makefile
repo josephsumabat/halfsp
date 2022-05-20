@@ -6,7 +6,7 @@ build: hpack
 hpack:
 	hpack .
 
-ghcid:
+ghcid: hpack
 	ghcid \
 		--command='cabal repl lib $(GHCID_GHC_OPTIONS)' \
 		--test='Lib.indexInGhcid' \
