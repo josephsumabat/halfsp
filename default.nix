@@ -25,6 +25,7 @@ let
       pkgs.haskellPackages.ghcid
       pkgs.haskellPackages.hlint
       pkgs.haskellPackages.hpack
+      pkgs.haskellPackages.ormolu
       pkgs.niv
       pkgs.alejandra
     ];

@@ -12,19 +12,18 @@ import Data.Array
 import Data.Containers.ListUtils (nubOrd)
 import Data.List (isSuffixOf)
 import qualified Data.Map as M
-import Data.Maybe (catMaybes)
+import Data.Maybe (catMaybes, mapMaybe)
 import qualified Data.Text as T
-import qualified GHC.Data.FastString as FS
 import GHC
-import HieDb hiding (pointCommand)
-import Language.LSP.Types
-import GHC.Utils.Monad (mapMaybeM)
-import Data.Maybe (mapMaybe)
-import System.FilePath ((</>))
-import GHC.Utils.Outputable hiding ((<>))
+import qualified GHC.Data.FastString as FS
 import GHC.Iface.Ext.Types
 import GHC.Iface.Ext.Utils
 import GHC.Plugins hiding ((<>))
+import GHC.Utils.Monad (mapMaybeM)
+import GHC.Utils.Outputable hiding ((<>))
+import HieDb hiding (pointCommand)
+import Language.LSP.Types
+import System.FilePath ((</>))
 
 -- {{{ Development.IDE.Types.Location
 --
@@ -73,8 +72,9 @@ pprStyleToSDocContext :: PprStyle -> SDocContext
 pprStyleToSDocContext pprStyle = defaultSDocContext {sdocStyle = pprStyle}
 
 unsafePrintSDoc :: SDoc -> String
-unsafePrintSDoc sdoc = renderWithContext sdocContext sdoc 
-  where sdocContext = pprStyleToSDocContext $ mkUserStyle neverQualify AllTheWay
+unsafePrintSDoc sdoc = renderWithContext sdocContext sdoc
+  where
+    sdocContext = pprStyleToSDocContext $ mkUserStyle neverQualify AllTheWay
 
 showNameWithoutUniques :: Outputable a => a -> T.Text
 showNameWithoutUniques outputable = T.pack $ renderWithContext sdocContext (ppr outputable)
@@ -98,7 +98,7 @@ hoverInfo typeLookup ast = (range, prettyNames ++ pTypes)
     prettyNames :: [T.Text]
     prettyNames = map prettyName names
 
-    prettyName :: (Identifier, IdentifierDetails TypeIndex) -> T.Text    
+    prettyName :: (Identifier, IdentifierDetails TypeIndex) -> T.Text
     prettyName (Right n, dets) =
       T.unlines $
         wrapHaskell (showNameWithoutUniques n <> maybe "" (" :: " <>) (prettyType <$> identType dets)) :
@@ -196,7 +196,7 @@ defRowToLocation wsroot (row :. info) =
       end = Position <$> (intToUInt $ defELine row - 1) <*> (intToUInt $ defECol row - 1)
       range = Range <$> start <*> end
       file = filePathToUri . (wsroot </>) <$> modInfoSrcFile info
-  in Location <$> file <*> range
+   in Location <$> file <*> range
 
 dropEnd1 :: [a] -> [a]
 dropEnd1 [] = []

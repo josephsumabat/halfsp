@@ -50,4 +50,3 @@ kuncodensity = ($ pure)
 
 kliftIO :: forall r s m a. MonadIO m => ((r -> IO r) -> IO a) -> (a -> m s) -> m s
 kliftIO k = kcodensity $ liftIO $ kuncodensity k
-

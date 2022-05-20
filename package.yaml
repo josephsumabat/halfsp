@@ -13,25 +13,20 @@ dependencies:
 ghc-options: -Wall
 default-extensions:
 - GADTs
-
 - StandaloneDeriving
 - DeriveFunctor
 - DerivingVia
 - GeneralizedNewtypeDeriving
-
 - ScopedTypeVariables
 - RankNTypes
 - QuantifiedConstraints
-
 - TypeApplications
 - TypeOperators
 - MultiParamTypeClasses
-
 - ConstraintKinds
 - DataKinds
 - PolyKinds
 - KindSignatures
-
 - UndecidableInstances
 - FlexibleInstances
 - FlexibleContexts

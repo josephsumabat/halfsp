@@ -9,13 +9,11 @@
 
 module Lib (serverMain, indexInGhcid) where
 
-import Data.Maybe (fromJust)
-import Language.LSP.Types
 import Control.Applicative
 import Control.Arrow ((&&&))
 import Control.Monad.Trans.Class (lift)
-import Control.Monad.Trans.Maybe (runMaybeT)
 import Control.Monad.Trans.Except (runExceptT, throwE)
+import Control.Monad.Trans.Maybe (runMaybeT)
 import Data.Bifunctor (Bifunctor (first, second))
 import Data.Coerce
 import Data.Functor ((<&>))
@@ -23,13 +21,13 @@ import Data.Functor.Compose
 import Data.Kind
 import Data.Map (Map)
 import qualified Data.Map as M
-import Data.Maybe (listToMaybe)
+import Data.Maybe (fromJust, listToMaybe)
 import Data.Monoid (Endo (..))
 import Data.String.Conversions
 import Data.Text (Text, intercalate, pack, replace, unpack)
-import GhcideSteal (gotoDefinition, hoverInfo, symbolKindOfOccName, intToUInt)
 import GHC.Iface.Ext.Types
-import GHC.Plugins hiding ((<>), Type, empty, getDynFlags)
+import GHC.Plugins hiding (Type, empty, getDynFlags, (<>))
+import GhcideSteal (gotoDefinition, hoverInfo, intToUInt, symbolKindOfOccName)
 import HieDb
   ( ModuleInfo (modInfoName),
     getAllIndexedMods,
@@ -40,7 +38,7 @@ import HieDb
     searchDef,
     withHieDb,
     withTarget,
-    type (:.) ((:.))
+    type (:.) ((:.)),
   )
 import HieDb.Run
   ( Options (..),
@@ -66,6 +64,7 @@ import Language.LSP.Server
     runServer,
     type (<~>) (Iso),
   )
+import Language.LSP.Types
 import Language.LSP.Types.Lens (uri)
 import Lens.Micro ((^.))
 import System.Directory (doesFileExist, getCurrentDirectory)
@@ -108,22 +107,22 @@ instance (Applicative f, Alternative g) => Alternative (LDAC f g) where
   empty = LDAC $ pure empty
   LDAC x <|> LDAC y = LDAC $ liftA2 (<|>) x y
 
-whicheverOfManyThingsWorks
-  :: (Applicative f, Applicative g, Alternative h)
-  => [f (g (h b))]
-  -> f (g (h b))
+whicheverOfManyThingsWorks ::
+  (Applicative f, Applicative g, Alternative h) =>
+  [f (g (h b))] ->
+  f (g (h b))
 whicheverOfManyThingsWorks = coerce . asum . fmap (LDAC . LDAC)
 
 -- TODO: Make this less hacky, involves fixing up the NULL entries in the modules table in hiedb
 textDocumentIdentifierToHieFilePath :: TextDocumentIdentifier -> HieTarget
 textDocumentIdentifierToHieFilePath (TextDocumentIdentifier u) =
-  Left
-  $ unpack
-  $ replace ".hs" ".hie"
-  $ replaceMany hardcodedSourceDirs ".hiefiles"
-  $ pack
-  $ fromJust
-  $ uriToFilePath u
+  Left $
+    unpack $
+      replace ".hs" ".hie" $
+        replaceMany hardcodedSourceDirs ".hiefiles" $
+          pack $
+            fromJust $
+              uriToFilePath u
 
 fmap2 :: (Functor f, Functor g) => (a -> b) -> f (g a) -> f (g b)
 fmap2 = fmap . fmap
@@ -161,26 +160,26 @@ renderHieDbError :: HieDbErr -> Text
 renderHieDbError =
   pack . \case
     NotIndexed modname munitid ->
-          "NotIndexed ModuleName: "
-      <> show modname
-      <> ", "
-      <> "(Maybe Unit): "
-      <> show (unitString <$> munitid)
+      "NotIndexed ModuleName: "
+        <> show modname
+        <> ", "
+        <> "(Maybe Unit): "
+        <> show (unitString <$> munitid)
     AmbiguousUnitId modinfo ->
       "AmbiguousUnitId (NonEmpty ModuleInfo): "
-      <> show modinfo
+        <> show modinfo
     NameNotFound occname mmodname munitid ->
       "NameNotFound OccName: "
-      <> occNameString occname
-      <> ", (Maybe ModuleName):"
-      <> show mmodname
-      <> ", (Maybe Unit): "
-      <> show (unitString <$> munitid)
+        <> occNameString occname
+        <> ", (Maybe ModuleName):"
+        <> show mmodname
+        <> ", (Maybe Unit): "
+        <> show (unitString <$> munitid)
     NoNameAtPoint tgt hiepos ->
       "NoNameAtPoint HieTarget: "
-      <> show tgt
-      <> ", (Int, Int): "
-      <> show hiepos
+        <> show tgt
+        <> ", (Int, Int): "
+        <> show hiepos
     NameUnhelpfulSpan name str ->
       "NameUnhelpfulSpan Name: "
         <> nameStableString name
@@ -280,13 +279,13 @@ doInitialize env _ = runExceptT $ do
     hieFiles <- getHieFilesIn (wsroot </> ".hiefiles")
     let options =
           Options
-            { trace = False
-            , quiet = True
-            , colour = True
-            , context = Nothing
-            , reindex = False
-            , keepMissing = False
-            , database
+            { trace = False,
+              quiet = True,
+              colour = True,
+              context = Nothing,
+              reindex = False,
+              keepMissing = False,
+              database
             }
     doIndex hiedb options stderr hieFiles
     pure env
@@ -305,13 +304,13 @@ indexInGhcid = do
     hieFiles <- getHieFilesIn (currentDir </> ".hiefiles")
     let options =
           Options
-            { trace = False
-            , quiet = True
-            , colour = True
-            , context = Nothing
-            , reindex = False
-            , keepMissing = False
-            , database
+            { trace = False,
+              quiet = True,
+              colour = True,
+              context = Nothing,
+              reindex = False,
+              keepMissing = False,
+              database
             }
     doIndex hiedb options stderr hieFiles
 

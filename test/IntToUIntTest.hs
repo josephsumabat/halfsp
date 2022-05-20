@@ -1,8 +1,8 @@
 module IntToUIntTest where
 
-import Test.Tasty.Hspec
 import GhcideSteal (intToUInt)
 import Language.LSP.Types
+import Test.Tasty.Hspec
 
 spec_intToUInt :: Spec
 spec_intToUInt =

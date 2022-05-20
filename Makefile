@@ -22,4 +22,7 @@ ghcid-test: hpack
 test: hpack
 	cabal test
 
-.PHONY: build hpack ghcid ghcid-test hie-index test
+format:
+	find app/ lib/ test/ -name "*.hs" -exec ormolu -m inplace {} +
+
+.PHONY: build hpack ghcid ghcid-test hie-index test format
