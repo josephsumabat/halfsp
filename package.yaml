@@ -70,7 +70,7 @@ tests:
     - halfsp
     - tasty
     - tasty-discover
-    - tasty-hunit
-    - lsp-test
+    - tasty-hspec
+    - lsp-types
     build-tools:
     - tasty-discover

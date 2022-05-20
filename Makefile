@@ -15,4 +15,11 @@ ghcid: hpack
 hie-index:
 	hiedb -D .hiedb index .hiefiles
 
-.PHONY: build hpack ghcid hie-index
+ghcid-test: hpack
+	ghcid \
+		--command='cabal repl halfsp-test'
+
+test: hpack
+	cabal test
+
+.PHONY: build hpack ghcid ghcid-test hie-index test
