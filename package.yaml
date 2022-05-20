@@ -63,6 +63,7 @@ tests:
     source-dirs: test
     dependencies:
     - halfsp
+    - hspec
     - tasty
     - tasty-discover
     - tasty-hspec

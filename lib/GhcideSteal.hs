@@ -20,7 +20,6 @@ import GHC.Iface.Ext.Types
 import GHC.Iface.Ext.Utils
 import GHC.Plugins hiding ((<>))
 import GHC.Utils.Monad (mapMaybeM)
-import GHC.Utils.Outputable hiding ((<>))
 import HieDb hiding (pointCommand)
 import Language.LSP.Types
 import System.FilePath ((</>))

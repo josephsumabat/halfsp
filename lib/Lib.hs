@@ -67,6 +67,7 @@ import Language.LSP.Server
 import Language.LSP.Types
 import Language.LSP.Types.Lens (uri)
 import Lens.Micro ((^.))
+import SymbolInformation (mkSymbolInformation)
 import System.Directory (doesFileExist, getCurrentDirectory)
 import System.FilePath ((<.>), (</>))
 import System.IO (stderr)
@@ -208,22 +209,20 @@ symbolInfo wsroot (DefRow {..} :. m) = do
     (_, _, Nothing) -> fail "unable to convert hiedb coords to lsp coords"
     (Just tdi, Just start, Just end) ->
       pure $
-        SymbolInformation
-          { _name = pack $ occNameString defNameOcc,
-            _kind = symbolKindOfOccName defNameOcc,
-            _location =
-              Location
-                { _uri = tdi ^. uri,
-                  _range =
-                    Range
-                      { _start = start,
-                        _end = end
-                      }
-                },
-            _containerName = Just $ pack $ moduleNameString $ modInfoName m,
-            _tags = Nothing,
-            _deprecated = Nothing
-          }
+        mkSymbolInformation
+          (pack $ occNameString defNameOcc)
+          (symbolKindOfOccName defNameOcc)
+          Nothing
+          ( Location
+              { _uri = tdi ^. uri,
+                _range =
+                  Range
+                    { _start = start,
+                      _end = end
+                    }
+              }
+          )
+          (Just $ pack $ moduleNameString $ modInfoName m)
 
 handleWorkspaceSymbolRequest :: Handlers (LspT c IO)
 handleWorkspaceSymbolRequest = requestHandler SWorkspaceSymbol $ \req ->
