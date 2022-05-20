@@ -28,7 +28,7 @@ import Data.Maybe (listToMaybe)
 import Data.Monoid (Endo (..))
 import Data.String.Conversions
 import Data.Text (Text, intercalate, pack, replace, unpack)
-import GhcideSteal (gotoDefinition, hoverInfo, symbolKindOfOccName)
+import GhcideSteal (gotoDefinition, hoverInfo, symbolKindOfOccName, intToUInt)
 import GHC.Iface.Ext.Types
 import GHC.Plugins hiding ((<>), Type, empty, getDynFlags)
 import HIE.Bios
@@ -104,8 +104,8 @@ getDynFlags wsroot = liftIO $ do
     CradleNone -> pure $ Left $ ResponseError InternalError "No cradle available" Nothing
 
 -- HieDb utils
-coordsHieDbToLSP :: (Int, Int) -> Position
-coordsHieDbToLSP (l, c) = Position {_line = fromIntegral $ l - 1, _character = fromIntegral $ c - 1}
+coordsHieDbToLSP :: (Int, Int) -> Maybe Position
+coordsHieDbToLSP (l, c) = Position <$> intToUInt (l - 1) <*> intToUInt (c - 1)
 
 coordsLSPToHieDb :: Position -> (Int, Int)
 coordsLSPToHieDb Position {..} = (fromIntegral _line + 1, fromIntegral _character + 1)
@@ -220,10 +220,14 @@ moduleSourcePathMap hiedb wsroot = do
 
 symbolInfo :: FilePath -> Res DefRow -> IO SymbolInformation
 symbolInfo wsroot (DefRow {..} :. m) = do
+  let mStart = coordsHieDbToLSP (defSLine, defSCol)
+      mEnd = coordsHieDbToLSP (defELine, defECol)
   mtdi <- moduleToTextDocumentIdentifier wsroot m
-  case mtdi of
-    Nothing -> fail "unable to find text document corresponding to module"
-    Just tdi ->
+  case (mtdi, mStart, mEnd) of
+    (Nothing, _, _) -> fail "unable to find text document corresponding to module"
+    (_, Nothing, _) -> fail "unable to convert hiedb coords to lsp coords"
+    (_, _, Nothing) -> fail "unable to convert hiedb coords to lsp coords"
+    (Just tdi, Just start, Just end) ->
       pure $
         SymbolInformation
           { _name = pack $ occNameString defNameOcc,
@@ -233,8 +237,8 @@ symbolInfo wsroot (DefRow {..} :. m) = do
                 { _uri = tdi ^. uri,
                   _range =
                     Range
-                      { _start = coordsHieDbToLSP (defSLine, defSCol),
-                        _end = coordsHieDbToLSP (defELine, defECol)
+                      { _start = start,
+                        _end = end
                       }
                 },
             _containerName = Just $ pack $ moduleNameString $ modInfoName m,

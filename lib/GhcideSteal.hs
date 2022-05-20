@@ -2,7 +2,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
 
-module GhcideSteal (hoverInfo, symbolKindOfOccName, locationsAtPoint, gotoDefinition) where
+module GhcideSteal (hoverInfo, symbolKindOfOccName, locationsAtPoint, gotoDefinition, intToUInt) where
 
 import Control.Monad (guard)
 import Control.Monad.IO.Class (MonadIO)
@@ -19,6 +19,7 @@ import GHC
 import HieDb hiding (pointCommand)
 import Language.LSP.Types
 import GHC.Utils.Monad (mapMaybeM)
+import Data.Maybe (mapMaybe)
 import System.FilePath ((</>))
 import GHC.Utils.Outputable hiding ((<>))
 import GHC.Iface.Ext.Types
@@ -158,7 +159,7 @@ pointCommand hf pos k =
           Nothing -> Nothing
           Just ast' -> Just $ k ast'
   where
-    sloc fs = mkRealSrcLoc fs (fromIntegral $ line + 1) (fromIntegral cha + 1)
+    sloc fs = mkRealSrcLoc fs (fromIntegral line + 1) (fromIntegral cha + 1)
     sp fs = mkRealSrcSpan (sloc fs) (sloc fs)
     line = _line pos
     cha = _character pos
@@ -186,18 +187,16 @@ nameToLocation hiedb wsroot name = runMaybeT $
           erow <- liftIO $ findDef hiedb (nameOccName name) (Just $ moduleName mod) Nothing
           case erow of
             [] -> MaybeT $ pure Nothing
-            xs -> lift $ mapMaybeM (runMaybeT . defRowToLocation wsroot) xs
-        xs -> lift $ mapMaybeM (runMaybeT . defRowToLocation wsroot) xs
+            xs -> pure $ mapMaybe (defRowToLocation wsroot) xs
+        xs -> pure $ mapMaybe (defRowToLocation wsroot) xs
 
-defRowToLocation :: Monad m => FilePath -> Res DefRow -> MaybeT m Location
-defRowToLocation wsroot (row :. info) = do
-  let start = Position (fromIntegral $ defSLine row - 1) (fromIntegral $ defSCol row - 1)
-      end = Position (fromIntegral $ defELine row - 1) (fromIntegral $ defECol row - 1)
-      range = Range start end
-  file <- case modInfoSrcFile info of
-    Just src -> pure $ filePathToUri $ wsroot </> src
-    Nothing -> MaybeT $ pure Nothing
-  pure $ Location file range
+defRowToLocation :: FilePath -> Res DefRow -> Maybe Location
+defRowToLocation wsroot (row :. info) =
+  let start = Position <$> (intToUInt $ defSLine row - 1) <*> (intToUInt $ defSCol row - 1)
+      end = Position <$> (intToUInt $ defELine row - 1) <*> (intToUInt $ defECol row - 1)
+      range = Range <$> start <*> end
+      file = filePathToUri . (wsroot </>) <$> modInfoSrcFile info
+  in Location <$> file <*> range
 
 dropEnd1 :: [a] -> [a]
 dropEnd1 [] = []
