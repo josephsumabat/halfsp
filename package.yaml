@@ -7,31 +7,26 @@ license: MIT
 build-type: Simple
 
 dependencies:
-- { name: "base", version: '>=4.13 && <4.15' }
+- base >= 4.7 && < 5
 - directory
 
 ghc-options: -Wall
 default-extensions:
 - GADTs
-
 - StandaloneDeriving
 - DeriveFunctor
 - DerivingVia
 - GeneralizedNewtypeDeriving
-
 - ScopedTypeVariables
 - RankNTypes
 - QuantifiedConstraints
-
 - TypeApplications
 - TypeOperators
 - MultiParamTypeClasses
-
 - ConstraintKinds
 - DataKinds
 - PolyKinds
 - KindSignatures
-
 - UndecidableInstances
 - FlexibleInstances
 - FlexibleContexts
@@ -68,9 +63,10 @@ tests:
     source-dirs: test
     dependencies:
     - halfsp
+    - hspec
     - tasty
     - tasty-discover
-    - tasty-hunit
-    - lsp-test
+    - tasty-hspec
+    - lsp-types
     build-tools:
     - tasty-discover

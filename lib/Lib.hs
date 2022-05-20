@@ -7,36 +7,29 @@
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE ViewPatterns #-}
 
-module Lib (serverMain) where
+module Lib (serverMain, indexInGhcid) where
 
 import Control.Applicative
 import Control.Arrow ((&&&))
-import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.Trans.Class (lift)
-import Control.Monad.Trans.Maybe (runMaybeT)
 import Control.Monad.Trans.Except (runExceptT, throwE)
+import Control.Monad.Trans.Maybe (runMaybeT)
 import Data.Bifunctor (Bifunctor (first, second))
 import Data.Coerce
-import Data.Foldable (asum)
 import Data.Functor ((<&>))
 import Data.Functor.Compose
 import Data.Kind
 import Data.Map (Map)
 import qualified Data.Map as M
-import Data.Maybe (listToMaybe)
+import Data.Maybe (fromJust, listToMaybe)
 import Data.Monoid (Endo (..))
 import Data.String.Conversions
 import Data.Text (Text, intercalate, pack, replace, unpack)
-import DynFlags (DynFlags)
-import GhcideSteal (gotoDefinition, hoverInfo, symbolKindOfOccName)
-import HIE.Bios
-  ( CradleLoadResult (CradleFail, CradleNone, CradleSuccess),
-    loadCradle,
-  )
-import HIE.Bios.Environment (getRuntimeGhcLibDir)
+import GHC.Iface.Ext.Types
+import GHC.Plugins hiding (Type, empty, getDynFlags, (<>))
+import GhcideSteal (gotoDefinition, hoverInfo, intToUInt, symbolKindOfOccName)
 import HieDb
   ( ModuleInfo (modInfoName),
-    dynFlagsForPrinting,
     getAllIndexedMods,
     getHieFilesIn,
     hieModInfo,
@@ -45,7 +38,7 @@ import HieDb
     searchDef,
     withHieDb,
     withTarget,
-    type (:.) ((:.))
+    type (:.) ((:.)),
   )
 import HieDb.Run
   ( Options (..),
@@ -56,10 +49,8 @@ import HieDb.Types
     HieDb,
     HieDbErr (..),
     HieTarget,
-    LibDir (LibDir),
     Res,
   )
-import HieTypes (HieAST, HieFile (hie_asts, hie_types), TypeIndex)
 import Language.LSP.Server
   ( Handlers,
     LanguageContextEnv (..),
@@ -74,41 +65,13 @@ import Language.LSP.Server
     type (<~>) (Iso),
   )
 import Language.LSP.Types
-  ( DefinitionParams (..),
-    ErrorCode (InternalError, InvalidRequest),
-    Hover (..),
-    HoverContents (..),
-    HoverParams (..),
-    List (List),
-    Location (Location, _range, _uri),
-    MarkupContent (..),
-    MarkupKind (MkMarkdown),
-    Message,
-    Method (Initialize, TextDocumentHover, WorkspaceSymbol),
-    Position (Position, _character, _line),
-    Range (Range, _end, _start),
-    RequestMessage (RequestMessage, _params),
-    ResponseError (ResponseError),
-    SMethod (STextDocumentDefinition, STextDocumentHover, SWorkspaceSymbol),
-    SymbolInformation (..),
-    TextDocumentIdentifier (..),
-    Uri,
-    WorkspaceSymbolParams (WorkspaceSymbolParams, _query),
-    filePathToUri,
-    sectionSeparator,
-    uriToFilePath,
-    type (|?) (InL, InR),
-  )
 import Language.LSP.Types.Lens (uri)
 import Lens.Micro ((^.))
-import Module (ModuleName, moduleNameSlashes, moduleNameString)
-import OccName
-  ( occNameString,
-  )
-import System.Directory (doesFileExist)
+import SymbolInformation (mkSymbolInformation)
+import System.Directory (doesFileExist, getCurrentDirectory)
 import System.FilePath ((<.>), (</>))
 import System.IO (stderr)
-import Utils (EK, ekbind, eklift, etbind, etpure, fromJust, kbind, kcodensity, kliftIO)
+import Utils (EK, ekbind, eklift, etbind, etpure, kbind, kcodensity, kliftIO)
 
 -- LSP utils
 getWsRoot :: MonadLsp cfg m => EK (m r) (m r) ResponseError FilePath
@@ -120,29 +83,17 @@ getWsRoot = kcodensity $ do
 
 -- TODO: Store the hiedb location, cradle, and GHC libdir on startup instead of reading them on every request
 
--- TODO: Retrieve the user's configured flags using hie-bios instead of using HieDb.Utils.dynFlagsForPrinting
-getDynFlags :: MonadIO m => FilePath -> m (Either ResponseError DynFlags)
-getDynFlags wsroot = liftIO $ do
-  cradle <- loadCradle (wsroot </> "hie.yaml")
-  mlibdir <- getRuntimeGhcLibDir cradle
-  case mlibdir of
-    CradleSuccess libdir -> do
-      dflags <- dynFlagsForPrinting $ LibDir libdir
-      pure $ Right dflags
-    CradleFail e -> pure $ Left $ ResponseError InternalError (pack $ show e) Nothing
-    CradleNone -> pure $ Left $ ResponseError InternalError "No cradle available" Nothing
-
 -- HieDb utils
-coordsHieDbToLSP :: (Int, Int) -> Position
-coordsHieDbToLSP (l, c) = Position {_line = l - 1, _character = c - 1}
+coordsHieDbToLSP :: (Int, Int) -> Maybe Position
+coordsHieDbToLSP (l, c) = Position <$> intToUInt (l - 1) <*> intToUInt (c - 1)
 
 coordsLSPToHieDb :: Position -> (Int, Int)
-coordsLSPToHieDb Position {..} = (_line + 1, _character + 1)
+coordsLSPToHieDb Position {..} = (fromIntegral _line + 1, fromIntegral _character + 1)
 
 -- {{{ hacky garbage that needs to be replaced
 
 hardcodedSourceDirs :: [Text]
-hardcodedSourceDirs = ["src", "test"]
+hardcodedSourceDirs = ["src", "lib", "test"]
 
 replaceMany :: [Text] -> Text -> Text -> Text
 replaceMany patterns substitution = appEndo . foldMap (Endo . flip replace substitution) $ patterns
@@ -157,22 +108,22 @@ instance (Applicative f, Alternative g) => Alternative (LDAC f g) where
   empty = LDAC $ pure empty
   LDAC x <|> LDAC y = LDAC $ liftA2 (<|>) x y
 
-whicheverOfManyThingsWorks
-  :: (Applicative f, Applicative g, Alternative h)
-  => [f (g (h b))]
-  -> f (g (h b))
+whicheverOfManyThingsWorks ::
+  (Applicative f, Applicative g, Alternative h) =>
+  [f (g (h b))] ->
+  f (g (h b))
 whicheverOfManyThingsWorks = coerce . asum . fmap (LDAC . LDAC)
 
 -- TODO: Make this less hacky, involves fixing up the NULL entries in the modules table in hiedb
 textDocumentIdentifierToHieFilePath :: TextDocumentIdentifier -> HieTarget
 textDocumentIdentifierToHieFilePath (TextDocumentIdentifier u) =
-  Left
-  $ unpack
-  $ replace ".hs" ".hie"
-  $ replaceMany hardcodedSourceDirs ".hiefiles"
-  $ pack
-  $ fromJust
-  $ uriToFilePath u
+  Left $
+    unpack $
+      replace ".hs" ".hie" $
+        replaceMany hardcodedSourceDirs ".hiefiles" $
+          pack $
+            fromJust $
+              uriToFilePath u
 
 fmap2 :: (Functor f, Functor g) => (a -> b) -> f (g a) -> f (g b)
 fmap2 = fmap . fmap
@@ -209,11 +160,32 @@ hieFileAndAstFromPointRequest hiedb tdocId position =
 renderHieDbError :: HieDbErr -> Text
 renderHieDbError =
   pack . \case
-    NotIndexed modname munitid -> "not indexed"
-    AmbiguousUnitId modinfo -> "ambiguous unit id"
-    NameNotFound occname mmodname munitid -> "name not found"
-    NoNameAtPoint tgt hiepos -> "no name at point"
-    NameUnhelpfulSpan name str -> "name unhelpful span"
+    NotIndexed modname munitid ->
+      "NotIndexed ModuleName: "
+        <> show modname
+        <> ", "
+        <> "(Maybe Unit): "
+        <> show (unitString <$> munitid)
+    AmbiguousUnitId modinfo ->
+      "AmbiguousUnitId (NonEmpty ModuleInfo): "
+        <> show modinfo
+    NameNotFound occname mmodname munitid ->
+      "NameNotFound OccName: "
+        <> occNameString occname
+        <> ", (Maybe ModuleName):"
+        <> show mmodname
+        <> ", (Maybe Unit): "
+        <> show (unitString <$> munitid)
+    NoNameAtPoint tgt hiepos ->
+      "NoNameAtPoint HieTarget: "
+        <> show tgt
+        <> ", (Int, Int): "
+        <> show hiepos
+    NameUnhelpfulSpan name str ->
+      "NameUnhelpfulSpan Name: "
+        <> nameStableString name
+        <> ", String: "
+        <> str
 
 hiedbErrorToResponseError :: HieDbErr -> ResponseError
 hiedbErrorToResponseError = flip (ResponseError InternalError) Nothing . renderHieDbError
@@ -228,26 +200,29 @@ moduleSourcePathMap hiedb wsroot = do
 
 symbolInfo :: FilePath -> Res DefRow -> IO SymbolInformation
 symbolInfo wsroot (DefRow {..} :. m) = do
+  let mStart = coordsHieDbToLSP (defSLine, defSCol)
+      mEnd = coordsHieDbToLSP (defELine, defECol)
   mtdi <- moduleToTextDocumentIdentifier wsroot m
-  case mtdi of
-    Nothing -> fail "unable to find text document corresponding to module"
-    Just tdi ->
+  case (mtdi, mStart, mEnd) of
+    (Nothing, _, _) -> fail "unable to find text document corresponding to module"
+    (_, Nothing, _) -> fail "unable to convert hiedb coords to lsp coords"
+    (_, _, Nothing) -> fail "unable to convert hiedb coords to lsp coords"
+    (Just tdi, Just start, Just end) ->
       pure $
-        SymbolInformation
-          { _name = pack $ occNameString defNameOcc,
-            _kind = symbolKindOfOccName defNameOcc,
-            _deprecated = Nothing,
-            _location =
-              Location
-                { _uri = tdi ^. uri,
-                  _range =
-                    Range
-                      { _start = coordsHieDbToLSP (defSLine, defSCol),
-                        _end = coordsHieDbToLSP (defELine, defECol)
-                      }
-                },
-            _containerName = Just $ pack $ moduleNameString $ modInfoName m
-          }
+        mkSymbolInformation
+          (pack $ occNameString defNameOcc)
+          (symbolKindOfOccName defNameOcc)
+          Nothing
+          ( Location
+              { _uri = tdi ^. uri,
+                _range =
+                  Range
+                    { _start = start,
+                      _end = end
+                    }
+              }
+          )
+          (Just $ pack $ moduleNameString $ modInfoName m)
 
 handleWorkspaceSymbolRequest :: Handlers (LspT c IO)
 handleWorkspaceSymbolRequest = requestHandler SWorkspaceSymbol $ \req ->
@@ -261,12 +236,12 @@ handleWorkspaceSymbolRequest = requestHandler SWorkspaceSymbol $ \req ->
     requestQuery :: Message 'WorkspaceSymbol -> Text
     requestQuery RequestMessage {_params = WorkspaceSymbolParams {_query = q}} = q
 
-retrieveHoverData :: HieDb -> DynFlags -> Message 'TextDocumentHover -> IO (Either ResponseError (Maybe Hover))
-retrieveHoverData hiedb dflags RequestMessage {_params = HoverParams {..}} =
+retrieveHoverData :: HieDb -> Message 'TextDocumentHover -> IO (Either ResponseError (Maybe Hover))
+retrieveHoverData hiedb RequestMessage {_params = HoverParams {..}} =
   hieFileAndAstFromPointRequest hiedb _textDocument _position `etbind` \(hiefile, mast) -> case mast of
     Nothing -> etpure Nothing
     Just ast -> etpure $
-      Just $ case hoverInfo dflags (hie_types hiefile) ast of
+      Just $ case hoverInfo (hie_types hiefile) ast of
         (mbrange, contents) ->
           Hover
             { _range = mbrange,
@@ -279,7 +254,7 @@ handleTextDocumentHoverRequest = requestHandler STextDocumentHover $ \req ->
     kliftIO $
       withHieDb (wsroot </> ".hiedb") `kbind` \hiedb ->
         kcodensity $
-          getDynFlags wsroot `etbind` \dflags -> retrieveHoverData hiedb dflags req
+          retrieveHoverData hiedb req
 
 handleDefinitionRequest :: Handlers (LspT c IO)
 handleDefinitionRequest = requestHandler STextDocumentDefinition $ \RequestMessage {_params = DefinitionParams {..}} ->
@@ -303,13 +278,13 @@ doInitialize env _ = runExceptT $ do
     hieFiles <- getHieFilesIn (wsroot </> ".hiefiles")
     let options =
           Options
-            { trace = False
-            , quiet = True
-            , colour = True
-            , context = Nothing
-            , reindex = False
-            , keepMissing = False
-            , database
+            { trace = False,
+              quiet = True,
+              colour = True,
+              context = Nothing,
+              reindex = False,
+              keepMissing = False,
+              database
             }
     doIndex hiedb options stderr hieFiles
     pure env
@@ -318,6 +293,25 @@ doInitialize env _ = runExceptT $ do
       case resRootPath env of
         Nothing -> throwE $ ResponseError InvalidRequest "No root workspace was found" Nothing
         Just wsroot -> pure wsroot
+
+indexInGhcid :: IO ()
+indexInGhcid = do
+  currentDir <- getCurrentDirectory
+  let database = currentDir </> ".hiedb"
+  withHieDb database $ \hiedb -> do
+    initConn hiedb
+    hieFiles <- getHieFilesIn (currentDir </> ".hiefiles")
+    let options =
+          Options
+            { trace = False,
+              quiet = True,
+              colour = True,
+              context = Nothing,
+              reindex = False,
+              keepMissing = False,
+              database
+            }
+    doIndex hiedb options stderr hieFiles
 
 serverDef :: ServerDefinition ()
 serverDef =
@@ -331,7 +325,8 @@ serverDef =
             handleDefinitionRequest
           ],
       interpretHandler = \env -> Iso (runLspT env) liftIO,
-      options = defaultOptions
+      options = defaultOptions,
+      defaultConfig = ()
     }
 
 serverMain :: IO Int

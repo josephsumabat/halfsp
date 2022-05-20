@@ -22,3 +22,15 @@ cabal.project.local~
 .ghc.environment.*
 
 *.cabal
+
+# direnv
+.envrc
+.direnv/
+
+# nix build
+result
+result-2
+
+# hiedb
+.hiedb
+.hiefiles/
