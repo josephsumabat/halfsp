@@ -13,7 +13,6 @@ import Data.Maybe (fromJust)
 import Language.LSP.Types
 import Control.Applicative
 import Control.Arrow ((&&&))
-import Control.Monad.IO.Class (MonadIO)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Maybe (runMaybeT)
 import Control.Monad.Trans.Except (runExceptT, throwE)
@@ -31,14 +30,8 @@ import Data.Text (Text, intercalate, pack, replace, unpack)
 import GhcideSteal (gotoDefinition, hoverInfo, symbolKindOfOccName, intToUInt)
 import GHC.Iface.Ext.Types
 import GHC.Plugins hiding ((<>), Type, empty, getDynFlags)
-import HIE.Bios
-  ( CradleLoadResult (CradleFail, CradleNone, CradleSuccess),
-    loadCradle,
-  )
-import HIE.Bios.Environment (getRuntimeGhcLibDir)
 import HieDb
   ( ModuleInfo (modInfoName),
-    dynFlagsForPrinting,
     getAllIndexedMods,
     getHieFilesIn,
     hieModInfo,
@@ -58,7 +51,6 @@ import HieDb.Types
     HieDb,
     HieDbErr (..),
     HieTarget,
-    LibDir (LibDir),
     Res,
   )
 import Language.LSP.Server
@@ -90,18 +82,6 @@ getWsRoot = kcodensity $ do
     Just p -> Right p
 
 -- TODO: Store the hiedb location, cradle, and GHC libdir on startup instead of reading them on every request
-
--- TODO: Retrieve the user's configured flags using hie-bios instead of using HieDb.Utils.dynFlagsForPrinting
-getDynFlags :: MonadIO m => FilePath -> m (Either ResponseError DynFlags)
-getDynFlags wsroot = liftIO $ do
-  cradle <- loadCradle (wsroot </> "hie.yaml")
-  mlibdir <- getRuntimeGhcLibDir cradle
-  case mlibdir of
-    CradleSuccess libdir -> do
-      dflags <- dynFlagsForPrinting $ LibDir libdir
-      pure $ Right dflags
-    CradleFail e -> pure $ Left $ ResponseError InternalError (pack $ show e) Nothing
-    CradleNone -> pure $ Left $ ResponseError InternalError "No cradle available" Nothing
 
 -- HieDb utils
 coordsHieDbToLSP :: (Int, Int) -> Maybe Position
@@ -275,9 +255,8 @@ handleTextDocumentHoverRequest = requestHandler STextDocumentHover $ \req ->
   getWsRoot `ekbind` \wsroot ->
     kliftIO $
       withHieDb (wsroot </> ".hiedb") `kbind` \hiedb ->
-        -- TODO: can probably remove this `getDynFlags` call somehow
         kcodensity $
-          getDynFlags wsroot `etbind` \_ -> retrieveHoverData hiedb req
+          retrieveHoverData hiedb req
 
 handleDefinitionRequest :: Handlers (LspT c IO)
 handleDefinitionRequest = requestHandler STextDocumentDefinition $ \RequestMessage {_params = DefinitionParams {..}} ->
