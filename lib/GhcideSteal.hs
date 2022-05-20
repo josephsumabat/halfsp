@@ -205,7 +205,7 @@ dropEnd1 (x : xs) = foldr (\z f y -> y : f z) (const []) xs x
 -- | Use 'fromIntegral' when it is safe to do so
 intToUInt :: Int -> Maybe UInt
 intToUInt x =
-  if minBoundAsInt >= x && x <= maxBoundAsInt
+  if minBoundAsInt <= x && x <= maxBoundAsInt
     then Just $ fromIntegral x
     else Nothing
   where
