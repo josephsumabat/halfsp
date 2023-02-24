@@ -12,7 +12,7 @@ import Data.Array
 import Data.Containers.ListUtils (nubOrd)
 import Data.List (isSuffixOf)
 import qualified Data.Map as M
-import Data.Maybe (catMaybes)
+import Data.Maybe (catMaybes, mapMaybe)
 import qualified Data.Text as T
 import GHC
 import qualified GHC.Data.FastString as FS
@@ -186,10 +186,10 @@ nameToLocation hiedb wsroot imports name = runMaybeT $
           erow <- liftIO $ findDef hiedb (nameOccName name) (Just $ moduleName mod) Nothing
           case erow of
             [] -> MaybeT $ pure Nothing
-            xs -> lift $ mapMaybeM (runMaybeT . (defRowToLocation wsroot imports)) xs
-        xs -> lift $ mapMaybeM (runMaybeT . (defRowToLocation wsroot imports)) xs
+            xs -> pure $ mapMaybe (defRowToLocation wsroot imports) xs
+        xs -> pure $ mapMaybe (defRowToLocation wsroot imports) xs
 
-defRowToLocation :: Monad m => FilePath ->  M.Map ModuleName Uri -> Res DefRow -> MaybeT m Location
+defRowToLocation :: FilePath -> M.Map ModuleName Uri -> Res DefRow -> Maybe Location
 defRowToLocation wsroot imports (row :. info) = do
   let start = Position <$> (intToUInt $ defSLine row - 1) <*> (intToUInt $ defSCol row - 1)
       end = Position <$> (intToUInt $ defELine row - 1) <*> (intToUInt $ defECol row - 1)
@@ -197,7 +197,7 @@ defRowToLocation wsroot imports (row :. info) = do
       file = case modInfoSrcFile info of
                 Just src -> Just $ filePathToUri $ wsroot </> src
                 Nothing -> M.lookup (modInfoName info) imports
-  MaybeT $ pure $ Location <$> file <*> range
+  Location <$> file <*> range
 
 dropEnd1 :: [a] -> [a]
 dropEnd1 [] = []
