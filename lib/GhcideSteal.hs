@@ -201,27 +201,35 @@ pointCommand hf pos k =
 nameToLocation :: MonadIO m => HieDb -> FilePath -> Name -> m (Maybe [Location])
 nameToLocation hiedb wsroot name = runMaybeT $
   case nameSrcSpan name of
-    sp@(RealSrcSpan rsp _)
-      -- Lookup in the db if we got a location in a boot file
-      | not $ "boot" `isSuffixOf` unpackFS (srcSpanFile rsp) -> MaybeT $ pure $ pure <$> srcSpanToLocation wsroot sp
+    --sp@(RealSrcSpan rsp _)
+    --  -- Lookup in the db if we got a location in a boot file
+    --  | not $ "boot" `isSuffixOf` unpackFS (srcSpanFile rsp) -> MaybeT $ pure $ pure <$> srcSpanToLocation wsroot sp
     sp -> do
       guard (sp /= wiredInSrcSpan)
       -- This case usually arises when the definition is in an external package.
       -- In this case the interface files contain garbage source spans
       -- so we instead read the .hie files to get useful source spans.
       mod <- MaybeT $ return $ nameModule_maybe name
-      erow <- liftIO $ findDef hiedb (nameOccName name) (Just $ moduleName mod) (Just $ moduleUnit mod)
-      case erow of
-        [] -> do
-          -- If the lookup failed, try again without specifying a unit-id.
-          -- This is a hack to make find definition work better with ghcide's nascent multi-component support,
-          -- where names from a component that has been indexed in a previous session but not loaded in this
-          -- session may end up with different unit ids
-          erow <- liftIO $ findDef hiedb (nameOccName name) (Just $ moduleName mod) Nothing
-          case erow of
-            [] -> MaybeT $ pure Nothing
-            xs -> lift $ mapMaybeM (runMaybeT . defRowToLocation wsroot) xs
-        xs -> lift $ mapMaybeM (runMaybeT . defRowToLocation wsroot) xs
+      
+      locResultOrFallbackIfEmpty
+              (liftIO $ findDef hiedb (nameOccName name) (Just $ moduleName mod) (Just $ moduleUnit mod)) $
+          -- If the lookup failed try again but use the tcClsName namespace - this resolved the location better because sometimes
+          -- the previous will only find the file but not the location if you're in a separate build target
+            -- If the lookup failed, try again without specifying a unit-id.
+            -- This is a hack to make find definition work better with ghcide's nascent multi-component support,
+            -- where names from a component that has been indexed in a previous session but not loaded in this
+            -- session may end up with different unit ids
+              locResultOrFallbackIfEmpty
+                (liftIO $ findDef hiedb (nameOccName name) (Just $ moduleName mod) Nothing) $
+                (MaybeT $ pure Nothing)
+
+    where
+      locResultOrFallbackIfEmpty xsM fallback = 
+        do
+          xs <- xsM
+          case xs of
+            [] -> fallback
+            nonEmptyXs -> lift $ mapMaybeM (runMaybeT . defRowToLocation wsroot) nonEmptyXs
 
 defRowToLocation :: Monad m => FilePath -> Res DefRow -> MaybeT m Location
 defRowToLocation wsroot (row :. info) = do
