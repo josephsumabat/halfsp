@@ -194,10 +194,10 @@ defRowToLocation wsroot imports (row :. info) = do
   let start = Position <$> (intToUInt $ defSLine row - 1) <*> (intToUInt $ defSCol row - 1)
       end = Position <$> (intToUInt $ defELine row - 1) <*> (intToUInt $ defECol row - 1)
       range = Range <$> start <*> end
-  file <- case modInfoSrcFile info of
-    Just src -> pure $ filePathToUri $ wsroot </> src
-    Nothing -> MaybeT $ pure $ M.lookup (modInfoName info) imports
-  Location file <$> (MaybeT . pure $ range)
+      file = case modInfoSrcFile info of
+                Just src -> Just $ filePathToUri $ wsroot </> src
+                Nothing -> M.lookup (modInfoName info) imports
+  MaybeT $ pure $ Location <$> file <*> range
 
 dropEnd1 :: [a] -> [a]
 dropEnd1 [] = []
